@@ -31,8 +31,8 @@ begin
  if actual is distinct from expected_revision then raise exception 'Dados alterados em outro dispositivo. Sincronize e tente novamente'; end if;
  if jsonb_typeof(payload->'participants') is distinct from 'object' or jsonb_typeof(payload->'entries') is distinct from 'array' then raise exception 'Formato inválido'; end if;
  if (select count(*) from jsonb_object_keys(payload->'participants'))<>4 then raise exception 'São necessários quatro participantes'; end if;
- delete from public.weekly_records;
- delete from public.participants;
+ delete from public.weekly_records where true;
+ delete from public.participants where true;
  insert into public.participants select x.* from jsonb_each(payload->'participants') p cross join lateral jsonb_populate_record(null::public.participants,p.value||jsonb_build_object('name',p.key)) x;
  insert into public.weekly_records select x.* from jsonb_array_elements(payload->'entries') e cross join lateral jsonb_populate_record(null::public.weekly_records,e.value||jsonb_build_object('date',nullif(e.value->>'date',''))) x;
  update public.challenge_settings set current_week=(payload->>'currentWeek')::integer,revision=actual+1 where id=1;
