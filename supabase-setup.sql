@@ -1,12 +1,5 @@
 -- Execute no SQL Editor do Supabase como administrador. Uma única instalação.
 begin;
-create table public.challenge_members (
- user_id uuid primary key references auth.users(id) on delete cascade
-);
-alter table public.challenge_members enable row level security;
-revoke all on public.challenge_members from anon, authenticated;
-grant select on public.challenge_members to authenticated;
-create policy members_self on public.challenge_members for select to authenticated using (user_id = (select auth.uid()));
 create table public.challenge_settings (
  id integer primary key check(id=1), current_week integer not null check(current_week between 1 and 20), revision bigint not null default 0
 );
@@ -38,21 +31,21 @@ create table public.weekly_records (
 );
 alter table public.challenge_settings enable row level security;
 revoke all on public.challenge_settings from anon, authenticated;
-grant select on public.challenge_settings to authenticated;
-create policy group_read on public.challenge_settings for select to authenticated using (exists(select 1 from public.challenge_members where user_id=(select auth.uid())));
+grant select on public.challenge_settings to anon, authenticated;
+create policy group_read on public.challenge_settings for select to anon, authenticated using (true);
 alter table public.participants enable row level security;
 revoke all on public.participants from anon, authenticated;
-grant select on public.participants to authenticated;
-create policy group_read on public.participants for select to authenticated using (exists(select 1 from public.challenge_members where user_id=(select auth.uid())));
+grant select on public.participants to anon, authenticated;
+create policy group_read on public.participants for select to anon, authenticated using (true);
 alter table public.weekly_records enable row level security;
 revoke all on public.weekly_records from anon, authenticated;
-grant select on public.weekly_records to authenticated;
-create policy group_read on public.weekly_records for select to authenticated using (exists(select 1 from public.challenge_members where user_id=(select auth.uid())));
--- Snapshot consistente; só membros podem ler. SECURITY DEFINER usa nomes qualificados.
+grant select on public.weekly_records to anon, authenticated;
+create policy group_read on public.weekly_records for select to anon, authenticated using (true);
+-- Desafio público: leitura e gravação via RPC sem login. Tabelas sem escrita direta.
+-- SECURITY DEFINER usa nomes qualificados e restrições de esquema.
 create function public.read_challenge() returns jsonb language plpgsql security definer set search_path = '' as $$
 declare result jsonb;
 begin
- if not exists(select 1 from public.challenge_members where user_id=auth.uid()) then raise exception 'Conta sem acesso ao desafio'; end if;
  select jsonb_build_object('revision',s.revision,'state',case when (select count(*) from public.participants)=0 then null else jsonb_build_object(
  'currentWeek',s.current_week,
  'participants',(select jsonb_object_agg(p.name,to_jsonb(p)-'name') from public.participants p),
@@ -64,7 +57,6 @@ end $$;
 create function public.write_challenge(payload jsonb,expected_revision bigint) returns bigint language plpgsql security definer set search_path = '' as $$
 declare actual bigint;
 begin
- if not exists(select 1 from public.challenge_members where user_id=auth.uid()) then raise exception 'Conta sem acesso ao desafio'; end if;
  select revision into actual from public.challenge_settings where id=1 for update;
  if actual is distinct from expected_revision then raise exception 'Dados alterados em outro dispositivo. Sincronize e tente novamente'; end if;
  if jsonb_typeof(payload->'participants') is distinct from 'object' or jsonb_typeof(payload->'entries') is distinct from 'array' then raise exception 'Formato inválido'; end if;
@@ -78,9 +70,6 @@ begin
 end $$;
 revoke all on function public.read_challenge() from public, anon;
 revoke all on function public.write_challenge(jsonb,bigint) from public, anon;
-grant execute on function public.read_challenge() to authenticated;
-grant execute on function public.write_challenge(jsonb,bigint) to authenticated;
+grant execute on function public.read_challenge() to anon, authenticated;
+grant execute on function public.write_challenge(jsonb,bigint) to anon, authenticated;
 commit;
--- Após criar/convidar os usuários em Authentication > Users, autorize cada UUID:
--- insert into public.challenge_members(user_id) values ('UUID-DO-USUARIO');
--- Para revogar: delete from public.challenge_members where user_id='UUID-DO-USUARIO';
